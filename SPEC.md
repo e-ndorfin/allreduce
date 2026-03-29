@@ -6,6 +6,8 @@
 | DONE     | Worker → Parent | Worker ID, final reduced vector                   |
 | SHUTDOWN | Parent → Worker | Tells workers to clean up on error                |
 
+How it would work is we would send CHUNK and then send an array of `vec_len`` floats after it. When we malloc the message and then try to say that the gradient vector length should be, say, 10, this doesn't work because we have to specify the array length pre-compilation - we can't do it at runtime. This is why we can't put the array of floats within the message. 
+
 # Procedure 
 **Initialization**
 1. Parent makes children with `fork`
