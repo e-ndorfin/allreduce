@@ -22,7 +22,8 @@ void worker_main(int id, int num_workers, int vec_len, float *input,
     float *recv_buf = malloc(sizeof(float) * (chunk_size + N));
 
     // First step: scatter-reduce. Send chunk[(i-r+N)%N], recv chunk[(i-r-1+N)%N], then aggregate
-    for (int r = 0; r < N - 1; r++) {
+    for (int r = 0; r < N - 1; r++)
+    {
         int send_idx = (id - r + N) % N;
         int recv_idx = (id - r - 1 + N) % N;
 
@@ -41,8 +42,9 @@ void worker_main(int id, int num_workers, int vec_len, float *input,
             recv_ptr[j] += recv_buf[j];
     }
 
-    // Second step: all gather. send chunk[(i-r+1+N)%N], recv chunk[(i-r+N)%N], memcpy 
-    for (int r = 0; r < N - 1; r++) {
+    // Second step: all gather. send chunk[(i-r+1+N)%N], recv chunk[(i-r+N)%N], memcpy
+    for (int r = 0; r < N - 1; r++)
+    {
         int send_idx = (id - r + 1 + N) % N;
         int recv_idx = (id - r + N) % N;
 
