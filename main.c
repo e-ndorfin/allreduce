@@ -59,6 +59,16 @@ int main(int argc, char *argv[])
             inputs[i][j] = (float)(i + 1);
     }
 
+    printf("Input Vectors:\n");
+    for (int i = 0; i < N; i++)
+    {
+        printf("  Worker %d: [", i);
+        for (int j = 0; j < L; j++)
+            printf("%.1f%s", inputs[i][j], j < L - 1 ? ", " : "");
+        printf("]\n");
+    }
+    printf("\n");
+
     // allocate ring pipes (worker<->worker) + single result pipe (worker 0 -> parent)
     int (*ring_pipe)[2] = malloc(sizeof(int[2]) * N);
     int result_pipe[2];
@@ -110,7 +120,6 @@ int main(int argc, char *argv[])
             }
 
             worker_main(i, N, L, inputs[i], ring_read_fd, ring_write_fd, result_fd);
-            // ARNAV TODO: this is where we handle our ring allreduce protocol
         }
         pids[i] = pid;
     }
@@ -131,6 +140,11 @@ int main(int argc, char *argv[])
         exit(1);
     }
     close(result_pipe[0]);
+
+    printf("Final Result:\n[");
+    for (int j = 0; j < done_hdr.vec_len; j++)
+        printf("%.1f%s", result_data[j], j < done_hdr.vec_len - 1 ? ", " : "");
+    printf("]\n\n");
 
     // NOTE: verification below is for testing only — remove for final project
     float expected = (float)(N * (N + 1)) / 2.0f;

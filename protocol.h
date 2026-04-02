@@ -5,7 +5,8 @@
 #include <unistd.h>
 
 // Types of messages
-typedef enum {
+typedef enum
+{
     MSG_INIT,
     MSG_CHUNK,
     MSG_DONE,
@@ -13,34 +14,39 @@ typedef enum {
 } msg_type_t;
 
 // Phases of allreduce operation
-typedef enum {
+typedef enum
+{
     PHASE_SCATTER_REDUCE,
     PHASE_ALLGATHER
 } phase_t;
 
 // Message headers
 
-typedef struct {
+typedef struct
+{
     msg_type_t type;
     int worker_id;
     int num_workers;
     int vec_len;
 } init_hdr_t;
 
-typedef struct {
+typedef struct
+{
     msg_type_t type;
     phase_t phase;
     int chunk_idx;
     int chunk_len;
 } chunk_hdr_t;
 
-typedef struct {
+typedef struct
+{
     msg_type_t type;
     int worker_id;
     int vec_len;
 } done_hdr_t;
 
-typedef struct {
+typedef struct
+{
     msg_type_t type;
 } shutdown_hdr_t;
 

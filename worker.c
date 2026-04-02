@@ -1,9 +1,46 @@
 #include "worker.h"
 #include "protocol.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+static void print_scatter_reduce(int id, int from_id, int round, int vec_len, int chunk_size,
+                                 int recv_chunk_idx, int recv_clen,
+                                 const float *vec_before, const float *recv_buf)
+{
+    int off = recv_chunk_idx * chunk_size;
+    printf("[Worker %d PID %d] scatter-reduce round %d from Worker %d: [", id, getpid(), round, from_id);
+    for (int i = 0; i < vec_len; i++)
+    {
+        if (i >= off && i < off + recv_clen)
+            printf("%.0f + %.0f", vec_before[i], recv_buf[i - off]);
+        else
+            printf("%.0f", vec_before[i]);
+        if (i < vec_len - 1)
+            printf(", ");
+    }
+    printf("]\n");
+}
+
+static void print_allgather(int id, int from_id, int round, int vec_len, int chunk_size,
+                            int recv_chunk_idx, int recv_clen,
+                            const float *vec_before, const float *recv_buf)
+{
+    int off = recv_chunk_idx * chunk_size;
+    printf("[Worker %d PID %d] all-gather round %d from Worker %d:     [", id, getpid(), round, from_id);
+    for (int i = 0; i < vec_len; i++)
+    {
+        if (i >= off && i < off + recv_clen)
+            printf("%.0f -> %.0f", vec_before[i], recv_buf[i - off]);
+        else
+            printf("%.0f", vec_before[i]);
+        if (i < vec_len - 1)
+            printf(", ");
+    }
+    printf("]\n");
+}
 
 static int chunk_len(int chunk_idx, int chunk_size, int num_workers, int vec_len)
 {
@@ -38,6 +75,9 @@ void worker_main(int id, int num_workers, int vec_len, float *input,
         chunk_hdr_t hdr;
         recv_chunk(ring_read_fd, &hdr, recv_buf);
 
+        int from_id = (id - 1 + N) % N;
+        print_scatter_reduce(id, from_id, r, vec_len, chunk_size, recv_idx, recv_clen, input, recv_buf);
+
         for (int j = 0; j < recv_clen; j++)
             recv_ptr[j] += recv_buf[j];
     }
@@ -59,12 +99,21 @@ void worker_main(int id, int num_workers, int vec_len, float *input,
         chunk_hdr_t hdr;
         recv_chunk(ring_read_fd, &hdr, recv_buf);
 
+        int ag_from_id = (id - 1 + N) % N;
+        print_allgather(id, ag_from_id, r, vec_len, chunk_size, recv_idx, recv_clen, input, recv_buf);
+
         memcpy(recv_ptr, recv_buf, recv_clen * sizeof(float));
     }
 
     // Send back to parent
     if (id == 0)
+    {
+        printf("[Worker %d PID %d] sending result to parent: [", id, getpid());
+        for (int i = 0; i < vec_len; i++)
+            printf("%.1f%s", input[i], i < vec_len - 1 ? ", " : "");
+        printf("]\n");
         send_done(result_fd, id, vec_len, input);
+    }
 
     close(ring_read_fd);
     close(ring_write_fd);
