@@ -69,12 +69,18 @@ int main(int argc, char *argv[])
     }
     printf("\n");
 
-    // allocate ring pipes (worker<->worker) + single result pipe (worker 0 -> parent)
+    // allocate pipes: init (parent->worker), ring (worker<->worker), result (worker 0->parent)
+    int (*init_pipe)[2] = malloc(sizeof(int[2]) * N);
     int (*ring_pipe)[2] = malloc(sizeof(int[2]) * N);
     int result_pipe[2];
 
     for (int i = 0; i < N; i++)
     {
+        if (pipe(init_pipe[i]) == -1)
+        {
+            perror("init_pipe");
+            exit(1);
+        }
         if (pipe(ring_pipe[i]) == -1)
         {
             perror("ring_pipe");
@@ -101,6 +107,7 @@ int main(int argc, char *argv[])
         if (pid == 0)
         {
             // child
+            int init_read_fd = init_pipe[i][0];
             int ring_read_fd = ring_pipe[(i - 1 + N) % N][0]; // previous node
             int ring_write_fd = ring_pipe[i][1];              // current node
             int result_fd = (i == 0) ? result_pipe[1] : -1;
@@ -108,6 +115,9 @@ int main(int argc, char *argv[])
             // close fds this child doesn't own
             for (int j = 0; j < N; j++)
             {
+                close(init_pipe[j][1]); // close all init write ends
+                if (j != i)
+                    close(init_pipe[j][0]); // close other workers' init read ends
                 if (ring_pipe[j][0] != ring_read_fd)
                     close(ring_pipe[j][0]);
                 if (ring_pipe[j][1] != ring_write_fd)
@@ -119,11 +129,24 @@ int main(int argc, char *argv[])
                 close(result_pipe[1]);
             }
 
-            worker_main(i, N, L, inputs[i], ring_read_fd, ring_write_fd, result_fd);
+            worker_main(init_read_fd, ring_read_fd, ring_write_fd, result_fd);
         }
         pids[i] = pid;
     }
 
+    // Parent: send INIT to each worker over init pipes
+    for (int i = 0; i < N; i++)
+    {
+        close(init_pipe[i][0]); // close read ends
+        if (send_init(init_pipe[i][1], i, N, L, inputs[i]) != 0)
+        {
+            fprintf(stderr, "Error: failed to send INIT to worker %d\n", i);
+            exit(1);
+        }
+        close(init_pipe[i][1]); // close write end after sending
+    }
+
+    // Close ring and result pipe ends the parent doesn't use
     for (int i = 0; i < N; i++)
     {
         close(ring_pipe[i][0]);
@@ -184,6 +207,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < N; i++)
         free(inputs[i]);
     free(inputs);
+    free(init_pipe);
     free(ring_pipe);
     free(pids);
 

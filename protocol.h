@@ -9,8 +9,7 @@ typedef enum
 {
     MSG_INIT,
     MSG_CHUNK,
-    MSG_DONE,
-    MSG_SHUTDOWN
+    MSG_DONE
 } msg_type_t;
 
 // Phases of allreduce operation
@@ -45,11 +44,6 @@ typedef struct
     int vec_len;
 } done_hdr_t;
 
-typedef struct
-{
-    msg_type_t type;
-} shutdown_hdr_t;
-
 // I/O helpers
 
 ssize_t read_all(int fd, void *buf, size_t count);
@@ -67,8 +61,6 @@ int recv_chunk(int fd, chunk_hdr_t *hdr, float *buf);
 
 int send_done(int fd, int worker_id, int vec_len, const float *data);
 int recv_done(int fd, done_hdr_t *hdr, float **data);
-
-int send_shutdown(int fd);
 
 // Signal handling
 
