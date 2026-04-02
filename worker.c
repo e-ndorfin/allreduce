@@ -12,10 +12,20 @@ static int chunk_len(int chunk_idx, int chunk_size, int num_workers, int vec_len
     return chunk_size;
 }
 
-void worker_main(int id, int num_workers, int vec_len, float *input,
+void worker_main(int init_read_fd,
                  int ring_read_fd, int ring_write_fd, int result_fd)
 {
-    int N = num_workers;
+    // Receive INIT message from parent over pipe
+    init_hdr_t init_hdr;
+    float *input;
+    if (recv_init(init_read_fd, &init_hdr, &input) != 0) {
+        _exit(1);
+    }
+    close(init_read_fd);
+
+    int id = init_hdr.worker_id;
+    int N = init_hdr.num_workers;
+    int vec_len = init_hdr.vec_len;
     int chunk_size = vec_len / N;
 
     // Recv buffer — sized for the largest possible chunk (last chunk with remainder)

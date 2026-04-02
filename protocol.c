@@ -192,23 +192,6 @@ int recv_done(int fd, done_hdr_t *hdr, float **data)
     return 0;
 }
 
-// Parent -> Worker (error cleanup)
-int send_shutdown(int fd)
-{
-
-    shutdown_hdr_t header;
-    header.type = MSG_SHUTDOWN;
-
-    ssize_t header_size = write_all(fd, &header, sizeof(shutdown_hdr_t));
-
-    if (header_size == -1)
-    {
-        return -1;
-    }
-
-    return 0;
-}
-
 // Signal handling
 
 void setup_sigpipe_handler(void)
