@@ -130,15 +130,20 @@ int main(int argc, char *argv[])
             // close fds this child doesn't own
             for (int j = 0; j < N; j++)
             {
-                close(init_pipe[j][1]); // close all init write ends
+                close(init_pipe[j][1]); // init pipe READ ONLY for children
                 if (j != i)
                     close(init_pipe[j][0]); // close other workers' init read ends
+
+                // Close all irrelevant pipe read/write ends
                 if (ring_pipe[j][0] != ring_read_fd)
                     close(ring_pipe[j][0]);
                 if (ring_pipe[j][1] != ring_write_fd)
                     close(ring_pipe[j][1]);
             }
+
+            // Close all children read-ends of result_pipe
             close(result_pipe[0]);
+
             if (i != 0)
             {
                 close(result_pipe[1]);
@@ -182,13 +187,13 @@ int main(int argc, char *argv[])
         close(init_pipe[i][1]); // close write end after sending
     }
 
-    // Close ring and result pipe ends the parent doesn't use
+    // Close parent's ring and result pipe ends
     for (int i = 0; i < N; i++)
     {
         close(ring_pipe[i][0]);
         close(ring_pipe[i][1]);
     }
-    close(result_pipe[1]);
+    close(result_pipe[1]); // read-only for parent
 
     // Receive final model from worker 0
     done_hdr_t done_hdr;
