@@ -1,73 +1,85 @@
 #include "protocol.h"
 #include "worker.h"
+#include "Tinn.h"
+#include "data.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <time.h>
 
-#define DEFAULT_NUM_WORKERS 3
-#define DEFAULT_VECTOR_LEN 6
+#define DEFAULT_NUM_WORKERS 4
+#define NIPS 256
+#define NHID 28
+#define NOPS 10
+#define NUM_EPOCHS 256
+#define LEARNING_RATE 5.0f
+#define ANNEAL 0.99f
 
 int main(int argc, char *argv[])
 {
     int N = DEFAULT_NUM_WORKERS;
-    int L = DEFAULT_VECTOR_LEN;
 
-    // parse -n and -l from argv
+    int nhid = NHID;
+    int num_epochs = NUM_EPOCHS;
+
+    // Input arguments
     if (argc > 1)
     {
         for (int argi = 1; argi < argc; argi++)
         {
-            if (strcmp(argv[argi], "-n") == 0)
+            if (strcmp(argv[argi], "--n") == 0 && argi + 1 < argc)
             {
                 N = atoi(argv[argi + 1]);
                 argi++;
             }
-            if (strcmp(argv[argi], "-l") == 0)
+            else if (strcmp(argv[argi], "--hidden_num") == 0 && argi + 1 < argc)
             {
-                L = atoi(argv[argi + 1]);
+                nhid = atoi(argv[argi + 1]);
+                argi++;
+            }
+            else if (strcmp(argv[argi], "--epoch_num") == 0 && argi + 1 < argc)
+            {
+                num_epochs = atoi(argv[argi + 1]);
                 argi++;
             }
         }
     }
-    // validate number of workers and vector size is adequate
-    if (!(N >= 3 && L >= N))
+
+    if (N < 2)
     {
-        fprintf(stderr, "Error: need at least 3 workers (got %d vectors, length %d)\n", N, L);
+        fprintf(stderr, "Error: need at least 2 workers (got %d)\n", N);
+        exit(1);
+    }
+    if (nhid < 1)
+    {
+        fprintf(stderr, "Error: need at least 1 hidden neuron (got %d)\n", nhid);
+        exit(1);
+    }
+    if (num_epochs < 1)
+    {
+        fprintf(stderr, "Error: need at least 1 epoch (got %d)\n", num_epochs);
         exit(1);
     }
 
     setup_sigpipe_handler();
+    srand(time(0));
 
-    printf("Ring AllReduce: %d workers, vector length %d\n", N, L);
+    printf("Distributed Training: %d workers, %d epochs, %d hidden\n", N, num_epochs, nhid);
 
-    /* ==========================================================
-     *  2. GENERATE INPUT VECTORS
-     * ==========================================================
-     *  For now im just gonna flag this (currently used for testing), but Arnav,
-     *  you will definitely need to change this for when you implement the actual
-     *  backprop steps (input vectors wont be fixed...)
-     * ========================================================== */
+    // Load training data
+    Data data = data_load("semeion.data", NIPS, NOPS);
+    printf("Loaded %d samples (%d inputs, %d outputs)\n", data.rows, data.nips, data.nops);
 
-    float **inputs = malloc(sizeof(float *) * N);
-    for (int i = 0; i < N; i++)
-    {
-        inputs[i] = malloc(sizeof(float) * L);
-        for (int j = 0; j < L; j++)
-            inputs[i][j] = (float)(i + 1);
-    }
+    // Build network and extract initial weights
+    Tinn tinn = xtbuild(NIPS, nhid, NOPS);
+    int param_count = tinn.nw + tinn.nb;
+    float *init_weights = malloc(sizeof(float) * param_count);
+    xtgetweights(tinn, init_weights);
 
-    printf("Input Vectors:\n");
-    for (int i = 0; i < N; i++)
-    {
-        printf("  Worker %d: [", i);
-        for (int j = 0; j < L; j++)
-            printf("%.1f%s", inputs[i][j], j < L - 1 ? ", " : "");
-        printf("]\n");
-    }
-    printf("\n");
+    printf("Network: %d -> %d -> %d (%d parameters)\n", NIPS, nhid, NOPS, param_count);
 
     // allocate pipes: init (parent->worker), ring (worker<->worker), result (worker 0->parent)
     int (*init_pipe)[2] = malloc(sizeof(int[2]) * N);
@@ -129,7 +141,13 @@ int main(int argc, char *argv[])
                 close(result_pipe[1]);
             }
 
+            // Free parent-only resources before entering worker
+            free(init_weights);
+            free(pids);
+            xtfree(tinn);
+
             worker_main(init_read_fd, ring_read_fd, ring_write_fd, result_fd);
+            // worker_main calls _exit, should not reach here
         }
         pids[i] = pid;
     }
@@ -138,7 +156,22 @@ int main(int argc, char *argv[])
     for (int i = 0; i < N; i++)
     {
         close(init_pipe[i][0]); // close read ends
-        if (send_init(init_pipe[i][1], i, N, L, inputs[i]) != 0)
+
+        init_hdr_t hdr;
+        hdr.type = MSG_INIT;
+        hdr.worker_id = i;
+        hdr.num_workers = N;
+        hdr.nips = NIPS;
+        hdr.nhid = nhid;
+        hdr.nops = NOPS;
+        hdr.num_rows = data.rows;
+        hdr.num_epochs = num_epochs;
+        hdr.learning_rate = LEARNING_RATE;
+        hdr.anneal = ANNEAL;
+        hdr.vec_len = param_count;
+        hdr.data_len = data.rows * (NIPS + NOPS);
+
+        if (send_init(init_pipe[i][1], &hdr, init_weights, data.flat) != 0)
         {
             fprintf(stderr, "Error: failed to send INIT to worker %d\n", i);
             exit(1);
@@ -154,35 +187,42 @@ int main(int argc, char *argv[])
     }
     close(result_pipe[1]);
 
+    // Receive final model from worker 0
     done_hdr_t done_hdr;
-    float *result_data = NULL;
+    float *final_weights = NULL;
 
-    if (recv_done(result_pipe[0], &done_hdr, &result_data) != 0)
+    if (recv_done(result_pipe[0], &done_hdr, &final_weights) != 0)
     {
         fprintf(stderr, "Error: failed to receive DONE from worker 0\n");
         exit(1);
     }
     close(result_pipe[0]);
 
-    printf("Final Result:\n[");
-    for (int j = 0; j < done_hdr.vec_len; j++)
-        printf("%.1f%s", result_data[j], j < done_hdr.vec_len - 1 ? ", " : "");
-    printf("]\n\n");
+    // Load trained weights into network
+    xtsetweights(tinn, final_weights);
 
-    // NOTE: verification below is for testing only — remove for final project
-    float expected = (float)(N * (N + 1)) / 2.0f;
-    int pass = 1;
-    for (int j = 0; j < done_hdr.vec_len; j++)
+    // Verify accuracy on the dataset
+    int correct = 0;
+    for (int s = 0; s < data.rows; s++)
     {
-        if (result_data[j] != expected)
+        const float *in = data.flat + s * (NIPS + NOPS);
+        const float *tg = data.flat + s * (NIPS + NOPS) + NIPS;
+        const float *pd = xtpredict(tinn, in);
+
+        // Find argmax of prediction and target
+        int pred_max = 0, targ_max = 0;
+        for (int j = 1; j < NOPS; j++)
         {
-            fprintf(stderr, "FAIL: result[%d] = %.2f, expected %.2f\n",
-                    j, result_data[j], expected);
-            pass = 0;
+            if (pd[j] > pd[pred_max])
+                pred_max = j;
+            if (tg[j] > tg[targ_max])
+                targ_max = j;
         }
+        if (pred_max == targ_max)
+            correct++;
     }
-    printf("Verification: %s\n", pass ? "PASS" : "FAIL");
-    free(result_data);
+    printf("\nFinal Accuracy: %d/%d (%.1f%%)\n",
+           correct, data.rows, 100.0 * correct / data.rows);
 
     // waiting on children, error handling
     for (int i = 0; i < N; i++)
@@ -202,14 +242,13 @@ int main(int argc, char *argv[])
     }
 
     // final cleanups
-    printf("Overall: %s\n", pass ? "PASS" : "FAIL");
-
-    for (int i = 0; i < N; i++)
-        free(inputs[i]);
-    free(inputs);
+    free(final_weights);
+    free(init_weights);
     free(init_pipe);
     free(ring_pipe);
     free(pids);
+    xtfree(tinn);
+    data_free(data);
 
-    return pass ? 0 : 1;
+    return 0;
 }
