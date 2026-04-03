@@ -62,21 +62,15 @@ ssize_t write_all(int fd, const void *buf, size_t count)
 
 // Message send / receive
 
-// Parent sending INIT message + data to worker
-int send_init(int fd, int worker_id, int num_workers,
-              int vec_len, const float *data)
+// Parent sending INIT message + weights + dataset to worker
+int send_init(int fd, const init_hdr_t *hdr,
+              const float *weights, const float *dataset)
 {
+    ssize_t h = write_all(fd, hdr, sizeof(init_hdr_t));
+    ssize_t w = write_all(fd, weights, sizeof(float) * hdr->vec_len);
+    ssize_t d = write_all(fd, dataset, sizeof(float) * hdr->data_len);
 
-    init_hdr_t header;
-    header.type = MSG_INIT;
-    header.worker_id = worker_id;
-    header.num_workers = num_workers;
-    header.vec_len = vec_len;
-
-    ssize_t header_size = write_all(fd, &header, sizeof(init_hdr_t));
-    ssize_t data_size = write_all(fd, data, sizeof(float) * vec_len);
-
-    if (header_size == -1 || data_size == -1)
+    if (h == -1 || w == -1 || d == -1)
     {
         return -1;
     }
@@ -84,22 +78,30 @@ int send_init(int fd, int worker_id, int num_workers,
     return 0;
 }
 
-// Worker receiving INIT message + data
-int recv_init(int fd, init_hdr_t *hdr, float **data)
+// Worker receiving INIT message + weights + dataset
+int recv_init(int fd, init_hdr_t *hdr,
+              float **weights, float **dataset)
 {
-
-    ssize_t header_size = read_all(fd, hdr, sizeof(init_hdr_t));
-
-    if (header_size == -1)
+    ssize_t h = read_all(fd, hdr, sizeof(init_hdr_t));
+    if (h == -1)
     {
         return -1;
     }
 
-    *data = malloc(sizeof(float) * hdr->vec_len);
-    ssize_t data_size = read_all(fd, *data, sizeof(float) * hdr->vec_len);
-
-    if (data_size == -1)
+    *weights = malloc(sizeof(float) * hdr->vec_len);
+    ssize_t w = read_all(fd, *weights, sizeof(float) * hdr->vec_len);
+    if (w == -1)
     {
+        free(*weights);
+        return -1;
+    }
+
+    *dataset = malloc(sizeof(float) * hdr->data_len);
+    ssize_t d = read_all(fd, *dataset, sizeof(float) * hdr->data_len);
+    if (d == -1)
+    {
+        free(*weights);
+        free(*dataset);
         return -1;
     }
 

@@ -26,7 +26,15 @@ typedef struct
     msg_type_t type;
     int worker_id;
     int num_workers;
-    int vec_len;
+    int nips;
+    int nhid;
+    int nops;
+    int num_rows;
+    int num_epochs;
+    float learning_rate;
+    float anneal;
+    int vec_len;   // nw + nb (weight/gradient vector length)
+    int data_len;  // num_rows * (nips + nops)
 } init_hdr_t;
 
 typedef struct
@@ -51,9 +59,10 @@ ssize_t write_all(int fd, const void *buf, size_t count);
 
 // Message send / recv
 
-int send_init(int fd, int worker_id, int num_workers,
-              int vec_len, const float *data);
-int recv_init(int fd, init_hdr_t *hdr, float **data);
+int send_init(int fd, const init_hdr_t *hdr,
+              const float *weights, const float *dataset);
+int recv_init(int fd, init_hdr_t *hdr,
+              float **weights, float **dataset);
 
 int send_chunk(int fd, phase_t phase, int chunk_idx,
                int chunk_len, const float *data);
