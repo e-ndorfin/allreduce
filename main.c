@@ -26,25 +26,28 @@ int main(int argc, char *argv[])
     int num_epochs = NUM_EPOCHS;
 
     // Input arguments
-    if (argc > 1)
+    for (int argi = 1; argi < argc; argi++)
     {
-        for (int argi = 1; argi < argc; argi++)
+        if (strcmp(argv[argi], "--n") == 0 && argi + 1 < argc)
         {
-            if (strcmp(argv[argi], "--n") == 0 && argi + 1 < argc)
-            {
-                N = atoi(argv[argi + 1]);
-                argi++;
-            }
-            else if (strcmp(argv[argi], "--hidden_num") == 0 && argi + 1 < argc)
-            {
-                nhid = atoi(argv[argi + 1]);
-                argi++;
-            }
-            else if (strcmp(argv[argi], "--epoch_num") == 0 && argi + 1 < argc)
-            {
-                num_epochs = atoi(argv[argi + 1]);
-                argi++;
-            }
+            N = atoi(argv[argi + 1]);
+            argi++;
+        }
+        else if (strcmp(argv[argi], "--hidden_num") == 0 && argi + 1 < argc)
+        {
+            nhid = atoi(argv[argi + 1]);
+            argi++;
+        }
+        else if (strcmp(argv[argi], "--epoch_num") == 0 && argi + 1 < argc)
+        {
+            num_epochs = atoi(argv[argi + 1]);
+            argi++;
+        }
+        else
+        {
+            fprintf(stderr, "Usage: %s [--n NUM_WORKERS] [--hidden_num HIDDEN] [--epoch_num EPOCHS]\n", argv[0]);
+            fprintf(stderr, "Unknown argument: %s\n", argv[argi]);
+            exit(1);
         }
     }
 
